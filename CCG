@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>CCG TERMINAL | TOKYO GHOUL</title>
+    <title>CCG TERMINAL | TOKYO GHOUL (ИСПРАВЛЕНАЯ ВЕРСИЯ)</title>
     <style>
         * {
             margin: 0;
@@ -20,7 +20,6 @@
             overflow-x: hidden;
         }
 
-        /* ЛОГИН / РЕГИСТРАЦИЯ — ЧЁРНО-БЕЛЫЙ АСКЕТИЗМ */
         #login-overlay {
             position: fixed;
             top: 0;
@@ -96,7 +95,6 @@
             color: #ccc;
         }
 
-        /* ОСНОВНОЙ ИНТЕРФЕЙС */
         #main-interface {
             display: none;
             padding: 20px 28px;
@@ -104,7 +102,6 @@
             margin: 0 auto;
         }
 
-        /* ШАПКА */
         .header {
             display: flex;
             justify-content: space-between;
@@ -142,7 +139,6 @@
             font-size: 0.8rem;
         }
 
-        /* ПАНЕЛЬ СОРТИРОВКИ */
         .sort-bar {
             background: #0a0a0a;
             padding: 14px 20px;
@@ -178,7 +174,6 @@
             color: white;
         }
 
-        /* КАТАЛОГ ТОВАРОВ */
         .catalog {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -238,7 +233,6 @@
             cursor: not-allowed;
         }
 
-        /* КОРЗИНА */
         .cart-overlay {
             display: none;
             position: fixed;
@@ -313,7 +307,6 @@
 </head>
 <body>
 
-<!-- АВТОРИЗАЦИЯ -->
 <div id="login-overlay">
     <div class="auth-box">
         <h2 id="auth-title">LOGIN</h2>
@@ -324,7 +317,6 @@
     </div>
 </div>
 
-<!-- ОСНОВНОЙ ИНТЕРФЕЙС -->
 <div id="main-interface">
     <div class="header">
         <div class="user-panel">
@@ -355,7 +347,6 @@
     <div class="catalog" id="catalog-list"></div>
 </div>
 
-<!-- КОРЗИНА -->
 <div id="cart-overlay" class="cart-overlay">
     <h4 style="border-bottom: 1px solid #5a5a5a; padding-bottom: 8px;">ЗАКАЗ</h4>
     <div id="cart-items-list"></div>
@@ -364,7 +355,7 @@
 </div>
 
 <script>
-    // =============== БАЗА ТОВАРОВ С ДАТАМИ И СТОКОМ ===============
+    // =============== БАЗА ТОВАРОВ ===============
     const RAW_PRODUCTS = [
         { id: 1, name: "Квинке «Юкимура»", price: 1450, type: "КВИНКЕ", stock: 3, dateAdded: "2025-02-10" },
         { id: 2, name: "Маска CCG Type-0", price: 620, type: "ЗАЩИТА", stock: 8, dateAdded: "2025-01-15" },
@@ -380,16 +371,24 @@
 
     let currentUser = null;
     let userBalance = 5000;
-    let cart = [];
-    let products = [...RAW_PRODUCTS];
+    let cart = [];           // каждый элемент: { id, quantity }
+    let products = [];
     let currentSort = "date";
     let currentOrder = "desc";
     let isCartVisible = false;
 
+    // Инициализация продуктов (один раз)
+    function initProducts() {
+        products = JSON.parse(JSON.stringify(RAW_PRODUCTS));
+    }
+    initProducts();
+
     function saveUserData() {
         if (!currentUser) return;
         localStorage.setItem(`ccg_balance_${currentUser}`, userBalance);
-        localStorage.setItem(`ccg_cart_${currentUser}`, JSON.stringify(cart));
+        // сохраняем только id и quantity, без productData
+        const cartToStore = cart.map(item => ({ id: item.id, quantity: item.quantity }));
+        localStorage.setItem(`ccg_cart_${currentUser}`, JSON.stringify(cartToStore));
         localStorage.setItem(`ccg_global_stock`, JSON.stringify(products.map(p => ({ id: p.id, stock: p.stock }))));
     }
 
@@ -402,7 +401,7 @@
                     const target = products.find(p => p.id === s.id);
                     if (target) target.stock = s.stock;
                 }
-            } catch(e) {}
+            } catch(e) { console.warn(e); }
         }
     }
 
@@ -412,10 +411,34 @@
         const storedCart = localStorage.getItem(`ccg_cart_${username}`);
         if (storedCart) {
             try {
-                cart = JSON.parse(storedCart);
-                if (!Array.isArray(cart)) cart = [];
+                const parsed = JSON.parse(storedCart);
+                if (Array.isArray(parsed)) {
+                    cart = parsed.map(item => ({ id: item.id, quantity: item.quantity }));
+                } else {
+                    cart = [];
+                }
             } catch(e) { cart = []; }
         } else { cart = []; }
+        // FIX: проверяем, чтобы количество в корзине не превышало остаток
+        validateCartAgainstStock();
+    }
+
+    // FIX: функция приведения корзины в соответствие с актуальным остатком
+    function validateCartAgainstStock() {
+        let changed = false;
+        for (let i = 0; i < cart.length; i++) {
+            const product = products.find(p => p.id === cart[i].id);
+            if (!product || product.stock <= 0) {
+                cart.splice(i,1);
+                i--;
+                changed = true;
+            } else if (cart[i].quantity > product.stock) {
+                cart[i].quantity = product.stock;
+                changed = true;
+                showToast(`Количество "${product.name}" уменьшено до ${product.stock} из-за изменения остатка.`);
+            }
+        }
+        if (changed) saveUserData();
     }
 
     function syncStockToLocal() {
@@ -435,7 +458,7 @@
         const container = document.getElementById('catalog-list');
         container.innerHTML = filtered.map(p => `
             <div class="item-card" data-id="${p.id}">
-                <div class="item-type">${p.type}</div>
+                <div class="item-type">${escapeHtml(p.type)}</div>
                 <div class="item-name">${escapeHtml(p.name)}</div>
                 <div class="price">${p.price} CP</div>
                 <div class="stock">НА СКЛАДЕ: <span id="stock-${p.id}">${p.stock}</span> шт.</div>
@@ -467,10 +490,10 @@
         if (existing) {
             existing.quantity++;
         } else {
-            cart.push({ id: productId, quantity: 1, productData: { ...product } });
+            cart.push({ id: productId, quantity: 1 });
         }
         saveUserData();
-        updateCartUI();
+        updateCartUI();     // внутри вызывает renderCartList при isCartVisible
         renderCatalog();
         showToast(`✓ ${product.name} добавлен в корзину.`);
     }
@@ -479,9 +502,9 @@
         const idx = cart.findIndex(i => i.id === productId);
         if (idx !== -1) cart.splice(idx,1);
         saveUserData();
-        updateCartUI();
-        renderCatalog();
-        if (isCartVisible) renderCartList();
+        updateCartUI();    // FIX: убран лишний вызов renderCatalog – он будет внутри updateCartUI? updateCartUI вызывает renderCartList, но не renderCatalog. Надо сохранить renderCatalog для обновления кнопок.
+        renderCatalog();    // нужно, чтобы обновились кнопки "ЗАКАЗАТЬ" (stock мог измениться)
+        if (isCartVisible) renderCartList(); // но renderCartList вызовется и внутри updateCartUI? Убрали двойной вызов, оставим явный.
         showToast(`Позиция удалена.`);
     }
 
@@ -511,6 +534,7 @@
         if (isCartVisible) renderCartList();
     }
 
+    // FIX: функция отображения корзины использует актуальные данные из products
     function renderCartList() {
         const container = document.getElementById('cart-items-list');
         if (!container) return;
@@ -520,15 +544,16 @@
         }
         let total = 0;
         let html = '';
-        cart.forEach(item => {
-            const prod = item.productData;
-            const subtotal = prod.price * item.quantity;
+        for (let item of cart) {
+            const product = products.find(p => p.id === item.id);
+            if (!product) continue; // товар удалён из каталога – пропускаем
+            const subtotal = product.price * item.quantity;
             total += subtotal;
             html += `
                 <div class="cart-item">
                     <div class="cart-item-info">
-                        <strong>${escapeHtml(prod.name)}</strong><br>
-                        ${prod.price} CP × ${item.quantity}
+                        <strong>${escapeHtml(product.name)}</strong><br>
+                        ${product.price} CP × ${item.quantity}
                     </div>
                     <div class="cart-item-qty">
                         <button class="qty-down" data-id="${item.id}">-</button>
@@ -538,7 +563,7 @@
                     </div>
                 </div>
             `;
-        });
+        }
         html += `<div style="margin-top:12px; text-align:right; font-weight:bold;">ИТОГО: ${total} CP</div>`;
         container.innerHTML = html;
         document.querySelectorAll('.qty-up').forEach(btn => {
@@ -568,7 +593,7 @@
         for (let item of cart) {
             const product = products.find(p => p.id === item.id);
             if (!product || product.stock < item.quantity) {
-                showToast(`Ошибка: ${item.productData.name} доступно только ${product?.stock || 0} шт.`);
+                showToast(`Ошибка: товар ${product?.name || '?'} доступно только ${product?.stock || 0} шт.`);
                 return;
             }
             totalCost += product.price * item.quantity;
@@ -615,14 +640,32 @@
         setTimeout(() => t.remove(), 2300);
     }
 
-    function escapeHtml(str) { return str.replace(/[&<>]/g, function(m){ if(m==='&') return '&amp;'; if(m==='<') return '&lt;'; if(m==='>') return '&gt;'; return m;}); }
+    function escapeHtml(str) {
+        return str.replace(/[&<>]/g, function(m){
+            if(m==='&') return '&amp;';
+            if(m==='<') return '&lt;';
+            if(m==='>') return '&gt;';
+            return m;
+        });
+    }
 
     function applySort() {
         renderCatalog();
+        // обновить активные кнопки сортировки по полю
         document.querySelectorAll('.sort-btn[data-sort]').forEach(btn => {
             if(btn.getAttribute('data-sort') === currentSort) btn.classList.add('active');
             else btn.classList.remove('active');
         });
+        // FIX: обновить активные кнопки направления
+        const ascBtn = document.getElementById('order-asc');
+        const descBtn = document.getElementById('order-desc');
+        if (currentOrder === 'asc') {
+            ascBtn.classList.add('active');
+            descBtn.classList.remove('active');
+        } else {
+            descBtn.classList.add('active');
+            ascBtn.classList.remove('active');
+        }
     }
 
     let isLoginMode = true;
@@ -631,6 +674,9 @@
         document.getElementById('auth-title').innerText = isLoginMode ? "LOGIN" : "REGISTER";
         document.getElementById('auth-btn').innerText = isLoginMode ? "AUTHENTICATE" : "CREATE ACCOUNT";
         document.getElementById('auth-toggle').innerHTML = isLoginMode ? "⟳ Сменить протокол: Регистрация" : "⟳ Сменить протокол: Вход";
+        // FIX: очистить поля при переключении
+        document.getElementById('username').value = '';
+        document.getElementById('password').value = '';
     }
 
     function handleAuth() {
@@ -662,7 +708,10 @@
             localStorage.setItem(`ccg_balance_${user}`, 5000);
             localStorage.setItem(`ccg_cart_${user}`, JSON.stringify([]));
             showToast("Регистрация завершена. Войдите.");
-            toggleAuthMode();
+            // FIX: очистить поля и переключить на логин
+            document.getElementById('username').value = '';
+            document.getElementById('password').value = '';
+            if (!isLoginMode) toggleAuthMode();
         }
     }
 
@@ -684,6 +733,7 @@
             ov.style.display = 'none';
             isCartVisible = false;
         } else {
+            validateCartAgainstStock();    // перед открытием проверяем актуальность корзины
             renderCartList();
             ov.style.display = 'block';
             isCartVisible = true;
